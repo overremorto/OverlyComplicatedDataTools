@@ -1,4 +1,6 @@
-﻿using OverlyComplicatedDataTools.Core.Helpers;
+﻿using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using OverlyComplicatedDataTools.Core.Helpers;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -13,70 +15,116 @@ namespace OverlyComplicatedDataTools.Core.Readers
     public class OCDTJSONReader : IOCDTDataReader
     {
         private string _filename;
-        private FileStream _fileStream;
+        private Stream _fileStream;
+        private Stream _stream;
         private StreamReader _streamReader;
-        private string[] _columns;
+        private ZipArchiveEntry _zipEntry;
+        private List<string> _columns;
         private Type[] _columnTypes;
-        private MethodInfo[] _parseMethods;
         private Dictionary<string, int> _columnOrdinal;
-        private string[] _rowData;
+        private JsonTextReader _jsonReader;
+        private JObject _columnObj;
+        private object[] _rowData;
+        private bool _streamDone;
 
         private const string OPTIONALLY_ENCLOSED_BY = "\"";
         private const string COLUMN_DELIMITER = ",";
 
 
-        public string[] Columns { get { return _columns; } }
+        public string[] Columns { get { return _columns.ToArray(); } }
 
         public OCDTJSONReader(string filename)
         {
             _filename = filename;
             _fileStream = new FileStream(_filename, FileMode.Open, FileAccess.Read, FileShare.Read);
-            _streamReader = new StreamReader(_fileStream);
+
+            if (Path.GetExtension(_filename) == ".zip")
+            {
+                var zip = new ZipArchive(_fileStream);
+                _zipEntry = zip.Entries.FirstOrDefault(e => Path.GetExtension(e.FullName) == ".json");
+                _stream = _zipEntry.Open();
+            }
+            else
+            {
+                _stream = _fileStream;
+            }
+            _streamReader = new StreamReader(_stream);
+            _jsonReader = new JsonTextReader(_streamReader);
             SetupColumns();
         }
 
         private void SetupColumns()
         {
-            var columnLine = _streamReader.ReadLine();
-            _columns = columnLine.Split(",");
+            var columnDictionary = new Dictionary<string, Type>();
             _columnOrdinal = new Dictionary<string, int>();
-            for (var i = 0; i < _columns.Length; i++)
-            {
-                _columnOrdinal[_columns[i]] = i;
-            }
-            _columnTypes = new Type[_columns.Length];
-            _parseMethods = new MethodInfo[_columns.Length];
-
+            _columns = new List<string>();
             // determin column types
-            while (Read() && _rowIndex < 500)
+            while (ReadColumns() && _rowIndex < 500)
             {
-                for (var i = 0; i < _columns.Length; i++)
+                foreach(var child in _columnObj.Children())
                 {
-                    var unparsed = (string)_rowData[i];
-                    var possibleType = TypeParser.DetermineType(unparsed);
-                    if (_columnTypes[i] == null || TypeParser.TYPE_PRIORITY_MAP[possibleType] > TypeParser.TYPE_PRIORITY_MAP[_columnTypes[i]])
+                    if (child.Type == JTokenType.Property)
                     {
-                        _columnTypes[i] = possibleType;
+                        var property = (child as JProperty);
+                        if (property.Value != null)
+                        {
+                            var type = JsonTypeMapper.Get(property.Value?.Type);
+                            if (!columnDictionary.ContainsKey(property.Name) || columnDictionary[property.Name] == null || (type != null && TypeParser.TYPE_PRIORITY_MAP.ContainsKey(type) && TypeParser.TYPE_PRIORITY_MAP[type] < TypeParser.TYPE_PRIORITY_MAP[columnDictionary[property.Name]]))
+                            {
+                                columnDictionary[property.Name] = type;
+                            }
+                            if (!_columns.Contains(property.Name))
+                            {
+                                _columns.Add(property.Name);
+                                _columnOrdinal[property.Name] = _columns.Count - 1;
+                            }
+                        }
                     }
                 }
+                //x.Children().Select(c=> c.Nam)
             }
 
-
-            for (var i = 0; i < _parseMethods.Length; i++)
+            _columnTypes = new Type[_columnOrdinal.Count];
+            foreach (var kvp in columnDictionary)
             {
-                var type = _columnTypes[i];
-                if (type != typeof(string))
-                {
-                    _parseMethods[i] = type.GetMethod("Parse", new[] { typeof(string) });
-                }
+                _columnTypes[_columnOrdinal[kvp.Key]] = kvp.Value;
             }
+
+            //_columnTypes = new Type[_columns.Length];
+            //_parseMethods = new MethodInfo[_columns.Length];
+
+            //for (var i = 0; i < _parseMethods.Length; i++)
+            //{
+            //    var type = _columnTypes[i];
+            //    if (type != typeof(string))
+            //    {
+            //        _parseMethods[i] = type.GetMethod("Parse", new[] { typeof(string) });
+            //    }
+            //}
 
             // reset stream position to data rows
-            _fileStream.Seek(0, SeekOrigin.Begin);
-            _streamReader.DiscardBufferedData();
-            columnLine = _streamReader.ReadLine();
+            
+            _streamDone = false;
+            if (_zipEntry != null)
+            {
+                _jsonReader.Close();
+                _stream.Close();
+                _stream.Dispose();
+                _streamReader.Close();
+                _streamReader.Dispose();
+                _stream = _zipEntry.Open();
+                _streamReader = new StreamReader(_stream);
+                _jsonReader = new JsonTextReader(_streamReader);
+            }
+            else
+            {
+                _stream.Seek(0, SeekOrigin.Begin);
+            }
+            _jsonReader = new JsonTextReader(_streamReader);
 
             _rowIndex = 0;
+
+            
         }
 
 
@@ -92,7 +140,7 @@ namespace OverlyComplicatedDataTools.Core.Readers
 
         public int RecordsAffected => _rowIndex;
 
-        public int FieldCount => _columns.Length;
+        public int FieldCount => _columns.Count;
 
         public void Close()
         {
@@ -108,12 +156,12 @@ namespace OverlyComplicatedDataTools.Core.Readers
 
         public bool GetBoolean(int i)
         {
-            return bool.Parse(_rowData[i]);
+            return (bool)_rowData[i];
         }
 
         public byte GetByte(int i)
         {
-            return byte.Parse(_rowData[i]);
+            return (byte)_rowData[i];
         }
 
         public long GetBytes(int i, long fieldOffset, byte[] buffer, int bufferoffset, int length)
@@ -123,7 +171,7 @@ namespace OverlyComplicatedDataTools.Core.Readers
 
         public char GetChar(int i)
         {
-            return char.Parse(_rowData[i]);
+            return (char)_rowData[i];
         }
 
         public long GetChars(int i, long fieldoffset, char[] buffer, int bufferoffset, int length)
@@ -143,17 +191,17 @@ namespace OverlyComplicatedDataTools.Core.Readers
 
         public DateTime GetDateTime(int i)
         {
-            return DateTime.Parse(_rowData[i]);
+            return (DateTime)_rowData[i];
         }
 
         public decimal GetDecimal(int i)
         {
-            return decimal.Parse(_rowData[i]);
+            return (decimal)_rowData[i];
         }
 
         public double GetDouble(int i)
         {
-            return double.Parse(_rowData[i]);
+            return (double)_rowData[i];
         }
 
         public Type GetFieldType(int i)
@@ -163,27 +211,27 @@ namespace OverlyComplicatedDataTools.Core.Readers
 
         public float GetFloat(int i)
         {
-            return float.Parse(_rowData[i]);
+            return (float)_rowData[i];
         }
 
         public Guid GetGuid(int i)
         {
-            return Guid.Parse(_rowData[i]);
+            return (Guid)_rowData[i];
         }
 
         public short GetInt16(int i)
         {
-            return short.Parse(_rowData[i]);
+            return (short)_rowData[i];
         }
 
         public int GetInt32(int i)
         {
-            return int.Parse(_rowData[i]);
+            return (int)_rowData[i];
         }
 
         public long GetInt64(int i)
         {
-            return long.Parse(_rowData[i]);
+            return (long)_rowData[i];
         }
 
         public string GetName(int i)
@@ -203,12 +251,12 @@ namespace OverlyComplicatedDataTools.Core.Readers
 
         public string GetString(int i)
         {
-            return _rowData[i];
+            return (string)_rowData[i];
         }
 
         public object GetValue(int i)
         {
-            return ConvertType(i);
+            return _rowData[i];
         }
 
         public int GetValues(object[] values)
@@ -228,73 +276,62 @@ namespace OverlyComplicatedDataTools.Core.Readers
 
         public bool Read()
         {
-            if (_streamReader.EndOfStream)
+            if (_streamDone)
             {
                 return false;
             }
             _rowData = Parse();
+            if (_streamDone)
+            {
+                return false;
+            }
             _rowIndex++;
             return true;
         }
 
-        private string[] Parse()
+        private object[] Parse()
         {
-            var text = _streamReader.ReadLine();
-            var results = new string[_columns.Length];
-            var split = text.Split(COLUMN_DELIMITER);
-            var columnIndex = 0;
-            for (var i = 0; i < split.Length; i++)
+            while (_jsonReader.Read())
             {
-                var quoteOpenForCell = false;
-                if (split[i].StartsWith(OPTIONALLY_ENCLOSED_BY))
+                if (_jsonReader.TokenType == JsonToken.StartObject)
                 {
-                    var stringBuilder = new StringBuilder();
-                    while (!split[i].EndsWith(OPTIONALLY_ENCLOSED_BY) || (split[i] == OPTIONALLY_ENCLOSED_BY && !quoteOpenForCell))
+                    // Load each object from the stream and do something with it
+                    JObject obj = JObject.Load(_jsonReader);
+                    var rowData = new object[_columns.Count];
+                    foreach (var child in obj.Children())
                     {
-                        quoteOpenForCell = true;
-                        stringBuilder.Append(split[i]);
-                        i++;
-                        if (i >= split.Length)
+                        if (child.Type == JTokenType.Property)
                         {
-                            text = _streamReader.ReadLine();
-                            split = text.Split(COLUMN_DELIMITER);
-                            split[0] = Environment.NewLine + split[0];
-                            i = 0;
-                        }
-                        else
-                        {
-                            stringBuilder.Append(COLUMN_DELIMITER);
+                            var property = (child as JProperty);
+                            var type = JsonTypeMapper.Get(property.Value?.Type);
+                            if (_columnOrdinal.ContainsKey(property.Name))
+                            {
+                                var columnOrdinal = _columnOrdinal[property.Name];
+                                rowData[columnOrdinal] = TypeParser.ConvertType((property.Value as JValue)?.Value, _columnTypes[columnOrdinal]);
+                            }
                         }
                     }
-
-                    stringBuilder.Append(split[i]);
-                    var str = stringBuilder.ToString();
-                    results[columnIndex] = str.Substring(1, stringBuilder.Length - 2).Replace("\\\"", "\"");
-                    columnIndex++;
-                }
-                else
-                {
-                    results[columnIndex] = split[i];
-                    columnIndex++;
+                    return rowData;
                 }
             }
-
-            return results;
+            _streamDone = true;
+            return null;
         }
 
-        private object ConvertType(int ordinal)
+        private bool ReadColumns()
         {
-            var type = _columnTypes?.Length > ordinal ? _columnTypes[ordinal] : null;
-            var parseMethod = _parseMethods?.Length > ordinal ? _parseMethods[ordinal] : null;
-            var str = _rowData[ordinal];
-
-            if (parseMethod == null)
+            while (_jsonReader.Read())
             {
-                return str;
-            }
+                if (_jsonReader.TokenType == JsonToken.StartObject)
+                {
+                    // Load each object from the stream and do something with it
+                    _columnObj = JObject.Load(_jsonReader);
+                    return true;
 
-            var parsedValue = parseMethod.Invoke(null, new[] { str });
-            return parsedValue;
+                }
+            }
+            _streamDone = true;
+            return false;
         }
     }
 }
