@@ -217,9 +217,9 @@ World," },
 
 
         [TestMethod]
-        public void CSVRealistic()
+        public void CSVRealisticZip()
         {
-            var reader = new OCDTCSVReader(".\\TestFiles\\TestCSV-realist-large.csv");
+            var reader = new OCDTCSVReader(".\\TestFiles\\TestCSV-realist-large.zip");
             var expectedCount = 1000000;
             var counter = 0;
 

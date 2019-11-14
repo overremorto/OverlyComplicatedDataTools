@@ -10,13 +10,11 @@ using System.Text;
 
 namespace OverlyComplicatedDataTools.Core.Readers
 {
-    public class OCDTCSVReader : IOCDTDataReader
+    public class OCDTJSONReader : IOCDTDataReader
     {
         private string _filename;
-        private Stream _fileStream;
-        private Stream _stream;
+        private FileStream _fileStream;
         private StreamReader _streamReader;
-        private ZipArchiveEntry _zipEntry;
         private string[] _columns;
         private Type[] _columnTypes;
         private MethodInfo[] _parseMethods;
@@ -29,22 +27,11 @@ namespace OverlyComplicatedDataTools.Core.Readers
 
         public string[] Columns { get { return _columns; } }
 
-        public OCDTCSVReader(string filename)
+        public OCDTJSONReader(string filename)
         {
             _filename = filename;
             _fileStream = new FileStream(_filename, FileMode.Open, FileAccess.Read, FileShare.Read);
-            
-            if (Path.GetExtension(_filename) == ".zip")
-            {
-                var zip = new ZipArchive(_fileStream);
-                _zipEntry = zip.Entries.FirstOrDefault(e => Path.GetExtension(e.FullName) == ".csv");
-                _stream = _zipEntry.Open();
-            }
-            else
-            {
-                _stream = _fileStream;
-            }
-            _streamReader = new StreamReader(_stream);
+            _streamReader = new StreamReader(_fileStream);
             SetupColumns();
         }
 
@@ -84,21 +71,9 @@ namespace OverlyComplicatedDataTools.Core.Readers
                 }
             }
 
-            _streamReader.DiscardBufferedData();
             // reset stream position to data rows
-            if (_zipEntry != null)
-            {
-                _stream.Close();
-                _stream.Dispose();
-                _streamReader.Close();
-                _streamReader.Dispose();
-                _stream = _zipEntry.Open();
-                _streamReader = new StreamReader(_stream);
-            }
-            else
-            {
-                _stream.Seek(0, SeekOrigin.Begin);
-            }
+            _fileStream.Seek(0, SeekOrigin.Begin);
+            _streamReader.DiscardBufferedData();
             columnLine = _streamReader.ReadLine();
 
             _rowIndex = 0;
@@ -122,14 +97,12 @@ namespace OverlyComplicatedDataTools.Core.Readers
         public void Close()
         {
             _streamReader?.Close();
-            _stream?.Close();
             _fileStream?.Close();
         }
 
         public void Dispose()
         {
             _streamReader?.Dispose();
-            _stream?.Dispose();
             _fileStream?.Dispose();
         }
 

@@ -269,11 +269,11 @@ order by c.column_id";
 
 
         [TestMethod]
-        public async Task SqlWriterCSVLarge()
+        public async Task SqlWriterCSVLargeZip()
         {
             var options = new TestOCDTOptions();
             options.TableName = "test.TestCSV-realist-large";
-            var csvReader = new OCDTCSVReader(".\\TestFiles\\TestCSV-realist-large.csv");
+            var csvReader = new OCDTCSVReader(".\\TestFiles\\TestCSV-realist-large.zip");
 
             using (var sqlConnection = new SqlConnection(options.ConnectionString))
             {
