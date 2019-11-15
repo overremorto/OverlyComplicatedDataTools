@@ -1,9 +1,11 @@
 ﻿using Newtonsoft.Json;
+using Newtonsoft.Json.Converters;
 using Newtonsoft.Json.Linq;
 using OverlyComplicatedDataTools.Core.Helpers;
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Dynamic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -295,22 +297,14 @@ namespace OverlyComplicatedDataTools.Core.Readers
             {
                 if (_jsonReader.TokenType == JsonToken.StartObject)
                 {
-                    // Load each object from the stream and do something with it
-                    JObject obj = JObject.Load(_jsonReader);
                     var rowData = new object[_columns.Count];
-                    foreach (var child in obj.Children())
+                    var result = (IDictionary<string, object>)JsonSerializer.Create().Deserialize<ExpandoObject>(_jsonReader);
+                    foreach (var key in result.Keys)
                     {
-                        if (child.Type == JTokenType.Property)
-                        {
-                            var property = (child as JProperty);
-                            var type = JsonTypeMapper.Get(property.Value?.Type);
-                            if (_columnOrdinal.ContainsKey(property.Name))
-                            {
-                                var columnOrdinal = _columnOrdinal[property.Name];
-                                rowData[columnOrdinal] = TypeParser.ConvertType((property.Value as JValue)?.Value, _columnTypes[columnOrdinal]);
-                            }
-                        }
+                        var columnOrdinal = _columnOrdinal[key];
+                        rowData[columnOrdinal] = TypeParser.ConvertType(result[key], _columnTypes[columnOrdinal]);
                     }
+
                     return rowData;
                 }
             }
@@ -324,10 +318,8 @@ namespace OverlyComplicatedDataTools.Core.Readers
             {
                 if (_jsonReader.TokenType == JsonToken.StartObject)
                 {
-                    // Load each object from the stream and do something with it
                     _columnObj = JObject.Load(_jsonReader);
                     return true;
-
                 }
             }
             _streamDone = true;
