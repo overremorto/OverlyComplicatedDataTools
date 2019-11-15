@@ -51,6 +51,9 @@
     <None Update="TestFiles\TestCSV-realist-large.zip">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Update="TestFiles\TestExcel-easy-small.xlsx">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Update="TestFiles\TestJSON-easy-small.json">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
